@@ -10,7 +10,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 2. React & Babel: Đã khai báo ReactDOM.development.js -->
+    <!-- 2. React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -114,7 +114,7 @@
                 try {
                     const { db, collection, query, where, getDocs, addDoc, serverTimestamp, appId } = window.fb;
                     
-                    // 1. Kiểm tra SĐT đã tồn tại chưa (Dùng đường dẫn đầy đủ giống Admin)
+                    // 1. Kiểm tra SĐT đã tồn tại chưa
                     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'members'), where('phone', '==', phone));
                     const snapshot = await getDocs(q);
                     
@@ -135,7 +135,6 @@
                         userData = { id: newDoc.id, name, phone, points: 0, rank: 'member' };
                     }
                     
-                    // Lưu local để lần sau tự vào
                     localStorage.setItem('paint_user', JSON.stringify(userData));
                     onLogin(userData);
                 } catch (err) {
@@ -177,31 +176,30 @@
             const [points, setPoints] = useState(0);
             const [history, setHistory] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [modal, setModal] = useState(null); // { type: 'success'|'error', title: '', content: '' }
+            const [modal, setModal] = useState(null); 
             const [manualCode, setManualCode] = useState('');
             
-            // Scanner ref
+            // Refs
             const scannerRef = useRef(null);
+            const processingRef = useRef(false); // KHÓA ĐỂ CHỐNG QUÉT LIÊN TỤC
 
             // 1. Check Login
             useEffect(() => {
                 const stored = localStorage.getItem('paint_user');
-                if (stored) {
-                    setUser(JSON.parse(stored));
-                }
+                if (stored) setUser(JSON.parse(stored));
             }, []);
 
-            // 2. Listen to Realtime Points & History
+            // 2. Listen to Realtime Data
             useEffect(() => {
                 if (!user || !window.fb) return;
                 const { db, doc, onSnapshot, collection, query, where, orderBy, limit, appId } = window.fb;
 
-                // Listen User Doc (Points) - SỬA ĐƯỜNG DẪN
+                // Listen User Doc
                 const unsubUser = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'members', user.id), (doc) => {
                     if (doc.exists()) setPoints(doc.data().points || 0);
                 });
 
-                // Listen History (5 recent) - SỬA ĐƯỜNG DẪN
+                // Listen History
                 const q = query(
                     collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), 
                     where('user_phone', '==', user.phone),
@@ -209,10 +207,7 @@
                 );
                 const unsubHist = onSnapshot(q, (snap) => {
                     let data = snap.docs.map(d => d.data());
-                    
-                    // Client-side sorting (Sắp xếp trong trình duyệt)
                     data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-                    
                     setHistory(data);
                 });
 
@@ -220,7 +215,6 @@
             }, [user]);
 
             // --- FUNCTIONS ---
-
             const handleLogout = () => {
                 if(confirm("Bạn muốn đăng xuất?")) {
                     localStorage.removeItem('paint_user');
@@ -229,64 +223,67 @@
             }
 
             const processCode = async (codeStr) => {
+                // [QUAN TRỌNG] Kiểm tra khóa: Nếu đang xử lý thì chặn ngay
+                if (processingRef.current) return;
+                processingRef.current = true;
+
                 let finalCode = codeStr;
-                if (codeStr.includes('=')) {
-                    finalCode = codeStr.split('=').pop();
-                }
+                if (codeStr.includes('=')) finalCode = codeStr.split('=').pop();
                 finalCode = finalCode.trim().toUpperCase();
 
-                if (!finalCode) return;
+                if (!finalCode) {
+                    processingRef.current = false;
+                    return;
+                }
 
                 setLoading(true);
-                if (view === 'scanner') stopScanner(); // Dừng camera để xử lý
+
+                // Tắt Camera an toàn trước khi xử lý DB
+                if (scannerRef.current) {
+                    try {
+                        await scannerRef.current.stop();
+                        scannerRef.current.clear();
+                        scannerRef.current = null;
+                    } catch (e) {
+                        console.error("Stop error:", e);
+                    }
+                }
+                if (view === 'scanner') setView('home');
 
                 try {
-                    const { db, doc, runTransaction, serverTimestamp, collection, addDoc, getDoc, appId } = window.fb;
+                    const { db, doc, runTransaction, serverTimestamp, collection, addDoc, appId } = window.fb;
                     
-                    // FIX: Trỏ vào đúng đường dẫn QR Codes trong Artifacts
                     const tempCodeRef = doc(db, 'artifacts', appId, 'public', 'data', 'qr_codes', finalCode);
-                    
-                    // Kiểm tra tồn tại trước khi transaction
-                    const codeSnapshot = await getDoc(tempCodeRef);
-                    if (!codeSnapshot.exists()) {
-                        throw { code: 'not-found', message: "Mã QR này không hợp lệ hoặc không tồn tại." };
-                    }
-                    
-                    // Bắt đầu Transaction
                     const memberRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', user.id);
                     const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'scan_history');
 
+                    // THỰC HIỆN TRANSACTION (Đọc trước - Ghi sau)
                     const result = await runTransaction(db, async (transaction) => {
-                        // FIX: ĐỌC DỮ LIỆU TRƯỚC (READ FIRST)
+                        // 1. READ ALL FIRST
                         const codeDoc = await transaction.get(tempCodeRef); 
                         const memberDoc = await transaction.get(memberRef);
 
-                        // VALIDATE DỮ LIỆU
-                        if (!codeDoc.exists()) throw { code: 'not-found', message: "Mã không tồn tại (Check)." };
-                        const codeData = codeDoc.data();
+                        if (!codeDoc.exists()) throw { code: 'not-found', message: "Mã không tồn tại trong hệ thống." };
                         
+                        const codeData = codeDoc.data();
                         if (codeData.status === 'used') throw { code: 'used', message: "Mã này đã được sử dụng rồi!" };
-                        if (codeData.status !== 'active') throw { code: 'inactive', message: "Mã chưa được kích hoạt!" };
+                        if (codeData.status !== 'active') throw { code: 'inactive', message: "Mã chưa được kích hoạt." };
 
-                        // TÍNH TOÁN
                         const newPoints = (codeData.points || 0);
                         const currentPoints = memberDoc.exists() ? (memberDoc.data().points || 0) : 0;
                         
-                        // GHI DỮ LIỆU SAU (WRITE LAST)
-                        // 1. Update Code -> used
+                        // 2. WRITE ALL LAST
                         transaction.update(tempCodeRef, { 
                             status: 'used',
                             usedBy: user.id,
                             usedAt: serverTimestamp()
                         });
-
-                        // 2. Update Member -> + points
                         transaction.update(memberRef, { points: currentPoints + newPoints });
 
-                        return { points: newPoints, product: codeData.productType };
+                        return { points: newPoints };
                     });
 
-                    // 3. Log history (outside transaction)
+                    // Log history (ngoài transaction)
                     await addDoc(historyRef, {
                         user_name: user.name,
                         user_phone: user.phone,
@@ -311,12 +308,9 @@
                     });
 
                 } catch (err) {
-                    // Xử lý lỗi từ Transaction hoặc getDoc
-                    let displayMsg = "Đã xảy ra lỗi không xác định.";
-                    
-                    if (typeof err === 'object' && err.message) {
-                         displayMsg = err.message;
-                    }
+                    let displayMsg = "Lỗi hệ thống không xác định.";
+                    if (err.message) displayMsg = err.message;
+                    if (err.code === 'permission-denied') displayMsg = "Lỗi quyền truy cập (Permission).";
                     
                     setModal({
                         type: 'error',
@@ -332,26 +326,28 @@
 
                 } finally {
                     setLoading(false);
-                    setView('home');
                     setManualCode('');
+                    // Mở khóa sau 1 giây để tránh double-click
+                    setTimeout(() => { processingRef.current = false; }, 1000);
                 }
             };
 
-            // --- SCANNER LOGIC ---
             const startScanner = () => {
                 setView('scanner');
+                // Reset flag khi bắt đầu quét mới
+                processingRef.current = false;
+                
                 setTimeout(() => {
                     const html5QrCode = new Html5Qrcode("reader");
                     scannerRef.current = html5QrCode;
                     html5QrCode.start(
                         { facingMode: "environment" }, 
                         { fps: 10, qrbox: { width: 250, height: 250 } },
-                        (decodedText, decodedResult) => {
+                        (decodedText) => {
+                            // Gọi hàm xử lý (đã có khóa bên trong)
                             processCode(decodedText);
                         },
-                        (errorMessage) => {
-                            // parse error, ignore loop
-                        }
+                        (errorMessage) => { /* ignore */ }
                     ).catch(err => {
                         alert("Không thể mở Camera: " + err);
                         setView('home');
@@ -364,7 +360,7 @@
                     scannerRef.current.stop().then(() => {
                         scannerRef.current.clear();
                         scannerRef.current = null;
-                    }).catch(err => console.error(err));
+                    }).catch(console.error);
                 }
                 setView('home');
             };
