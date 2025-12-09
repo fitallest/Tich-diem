@@ -72,14 +72,6 @@
         const { useState, useEffect, useRef, useMemo } = React;
         const formatMoney = (n) => new Intl.NumberFormat('vi-VN').format(n);
 
-        // --- DATA QUÀ TẶNG (Giống Admin) ---
-        const REWARDS_LIST = [
-            { id: 'R1', name: 'Thẻ Cào 50k', points: 500, icon: 'fa-ticket', color: 'text-green-600 bg-green-50' },
-            { id: 'R2', name: 'Áo Mưa / Mũ BH', points: 1000, icon: 'fa-shirt', color: 'text-blue-600 bg-blue-50' },
-            { id: 'R3', name: '01 Chỉ Vàng', points: 8000, icon: 'fa-coins', color: 'text-yellow-600 bg-yellow-50' },
-            { id: 'R4', name: 'iPhone 17 Pro', points: 10000, icon: 'fa-mobile', color: 'text-purple-600 bg-purple-50' },
-        ];
-
         // --- COMPONENTS ---
         const Loading = ({ msg }) => (
             <div className="fixed inset-0 bg-black/60 z-[60] flex flex-col items-center justify-center text-white backdrop-blur-sm">
@@ -162,6 +154,7 @@
             const [modal, setModal] = useState(null);
             const [manualCode, setManualCode] = useState('');
             const [filterType, setFilterType] = useState('all'); // all, scan, redeem
+            const [rewards, setRewards] = useState([]); // Dynamic Rewards
             
             const scannerRef = useRef(null);
             const processingRef = useRef(false); // Lock for scanner
@@ -187,13 +180,20 @@
                     data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                     setHistory(data);
                 });
+                
+                // Fetch Reward Templates from Firebase
+                const unsubRewards = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reward_templates'), (snap) => {
+                     const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                     data.sort((a, b) => (a.points || 0) - (b.points || 0));
+                     setRewards(data);
+                });
 
-                return () => { unsubUser(); unsubHist(); };
+                return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
             const canRedeemAny = useMemo(() => {
-                return REWARDS_LIST.some(r => points >= r.points);
-            }, [points]);
+                return rewards.some(r => points >= r.points);
+            }, [points, rewards]);
 
             const filteredHistory = useMemo(() => {
                 if (filterType === 'all') return history;
@@ -476,7 +476,8 @@
                                 <div className="space-y-4 pb-6">
                                     <h3 className="font-bold text-gray-700 text-center uppercase tracking-wide">Kho Quà Tặng</h3>
                                     <div className="grid grid-cols-1 gap-4">
-                                        {REWARDS_LIST.map(reward => (
+                                        {rewards.length === 0 ? <p className="text-center text-gray-400 text-sm">Chưa có quà nào được cập nhật.</p> :
+                                        rewards.map(reward => (
                                             <div key={reward.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
                                                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl ${reward.color}`}>
                                                     <i className={`fa-solid ${reward.icon}`}></i>
@@ -501,7 +502,7 @@
                     </div>
 
                     {/* BOTTOM NAV */}
-                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-2 pb-safe z-40 flex justify-between items-center text-xs font-bold text-gray-400">
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-2 safe-area-bottom z-40 flex justify-between items-center text-xs font-bold text-gray-400">
                         <button onClick={() => { setActiveTab('home'); setIsScanning(false); }} className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'home' && !isScanning ? 'text-blue-600' : ''}`}>
                             <i className="fa-solid fa-house text-xl"></i> Trang chủ
                         </button>
