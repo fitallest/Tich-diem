@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -10,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 2. React & Babel -->
+    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -24,7 +23,6 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, doc, getDoc, getDocs, query, where, serverTimestamp, runTransaction, onSnapshot, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Cấu hình dự án tichdiemson (Dùng chung với Admin)
         const firebaseConfig = {
             apiKey: "AIzaSyBYZT7Lxsckock5kv0RIZ3W8JHe2W8CMLE",
             authDomain: "tichdiemson.firebaseapp.com",
@@ -35,38 +33,35 @@
             measurementId: "G-YQJTGE1JV6"
         };
         
-        // ID Ứng dụng để đồng bộ với trang Admin
         const appId = 'tichdiemson-app';
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // Expose to Window
         window.fb = {
             auth, db, appId,
             signInAnonymously, onAuthStateChanged,
             collection, addDoc, updateDoc, doc, getDoc, getDocs, query, where, serverTimestamp, runTransaction, onSnapshot, orderBy, limit
         };
 
-        // Auto Login Anonymous để kết nối DB
-        signInAnonymously(auth).catch(e => {
-            console.error("Login Error:", e);
-            if (e.code === 'auth/configuration-not-found' || e.code === 'auth/operation-not-allowed') {
-                window.authError = e; 
-            }
-        });
+        signInAnonymously(auth).catch(e => console.error("Login Error:", e));
     </script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
         .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
-        .animate-slide-up { animation: slideUp 0.3s ease-out; }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        /* Scanner UI Customization */
-        #reader { width: 100%; border-radius: 12px; overflow: hidden; }
-        #reader video { object-fit: cover; border-radius: 12px; }
+        
+        /* Modal Animation */
+        .modal-enter { opacity: 0; transform: scale(0.9); }
+        .modal-enter-active { opacity: 1; transform: scale(1); transition: opacity 300ms, transform 300ms; }
+        .modal-exit { opacity: 1; }
+        .modal-exit-active { opacity: 0; transition: opacity 200ms; }
+
+        /* Scanner */
+        #reader { width: 100%; height: 100%; object-fit: cover; }
+        #reader video { width: 100%; height: 100%; object-fit: cover; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-gray-800">
@@ -74,27 +69,37 @@
     <div id="root" class="h-full w-full max-w-md mx-auto bg-white shadow-2xl relative flex flex-col"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
         const formatMoney = (n) => new Intl.NumberFormat('vi-VN').format(n);
+
+        // --- DATA QUÀ TẶNG (Giống Admin) ---
+        const REWARDS_LIST = [
+            { id: 'R1', name: 'Thẻ Cào 50k', points: 500, icon: 'fa-ticket', color: 'text-green-600 bg-green-50' },
+            { id: 'R2', name: 'Áo Mưa / Mũ BH', points: 1000, icon: 'fa-shirt', color: 'text-blue-600 bg-blue-50' },
+            { id: 'R3', name: '01 Chỉ Vàng', points: 8000, icon: 'fa-coins', color: 'text-yellow-600 bg-yellow-50' },
+            { id: 'R4', name: 'iPhone 17 Pro', points: 10000, icon: 'fa-mobile', color: 'text-purple-600 bg-purple-50' },
+        ];
 
         // --- COMPONENTS ---
         const Loading = ({ msg }) => (
-            <div className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center text-white backdrop-blur-sm">
+            <div className="fixed inset-0 bg-black/60 z-[60] flex flex-col items-center justify-center text-white backdrop-blur-sm">
                 <i className="fa-solid fa-circle-notch fa-spin text-4xl mb-3"></i>
                 <span className="font-medium">{msg}</span>
             </div>
         );
 
         const Modal = ({ title, type, children, onClose }) => (
-            <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4 backdrop-blur-sm animate-fade">
-                <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-scale">
+            <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-100">
                     <div className={`p-4 flex items-center justify-between ${type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600'} text-white`}>
                         <h3 className="font-bold text-lg">{title}</h3>
-                        <button onClick={onClose}><i className="fa-solid fa-xmark text-xl"></i></button>
+                        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="p-6">
                         {children}
-                        <button onClick={onClose} className="w-full mt-6 py-3 rounded-xl font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors">Đóng</button>
+                        <button onClick={onClose} className="w-full mt-6 py-3 rounded-xl font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors shadow-sm border border-gray-300">
+                            {type === 'success' ? 'Đóng' : 'Đóng'}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -109,60 +114,37 @@
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!phone || !name) return alert("Vui lòng nhập đủ thông tin!");
-                
                 setLoading(true);
                 try {
                     const { db, collection, query, where, getDocs, addDoc, serverTimestamp, appId } = window.fb;
-                    
-                    // 1. Kiểm tra SĐT đã tồn tại chưa
                     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'members'), where('phone', '==', phone));
                     const snapshot = await getDocs(q);
                     
                     let userData;
                     if (!snapshot.empty) {
-                        // Đã có -> Đăng nhập
                         userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
                     } else {
-                        // Chưa có -> Tạo mới
                         const newDoc = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'members'), {
-                            name: name,
-                            phone: phone,
-                            points: 0,
-                            rank: 'member',
-                            joinDate: new Date().toLocaleDateString('vi-VN'),
-                            createdAt: serverTimestamp()
+                            name: name, phone: phone, points: 0, rank: 'member', joinDate: new Date().toLocaleDateString('vi-VN'), createdAt: serverTimestamp()
                         });
                         userData = { id: newDoc.id, name, phone, points: 0, rank: 'member' };
                     }
-                    
                     localStorage.setItem('paint_user', JSON.stringify(userData));
                     onLogin(userData);
-                } catch (err) {
-                    alert("Lỗi đăng nhập: " + err.message);
-                } finally {
-                    setLoading(false);
-                }
+                } catch (err) { alert("Lỗi: " + err.message); } 
+                finally { setLoading(false); }
             };
 
             return (
                 <div className="h-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-blue-600 to-blue-800 text-white">
                     <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-blue-600 text-3xl font-bold mb-6 shadow-lg">ST</div>
                     <h1 className="text-2xl font-bold mb-2">Xin chào Thợ Sơn!</h1>
-                    <p className="text-blue-100 mb-8 text-center text-sm">Nhập thông tin để tích điểm & nhận quà</p>
-                    
-                    <form onSubmit={handleSubmit} className="w-full bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-xl">
+                    <p className="text-blue-100 mb-8">Nhập thông tin để tích điểm</p>
+                    <form onSubmit={handleSubmit} className="w-full bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20">
                         <div className="space-y-4">
-                            <div>
-                                <label className="text-xs uppercase font-bold text-blue-200 ml-1">Số điện thoại</label>
-                                <input type="tel" className="w-full mt-1 p-3 rounded-xl bg-white/90 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold text-lg tracking-wide" placeholder="09xxxxxxx" value={phone} onChange={e => setPhone(e.target.value)} />
-                            </div>
-                            <div>
-                                <label className="text-xs uppercase font-bold text-blue-200 ml-1">Họ và Tên</label>
-                                <input type="text" className="w-full mt-1 p-3 rounded-xl bg-white/90 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400" placeholder="Nguyễn Văn A" value={name} onChange={e => setName(e.target.value)} />
-                            </div>
-                            <button type="submit" className="w-full py-4 bg-yellow-400 hover:bg-yellow-300 text-blue-900 font-bold rounded-xl shadow-lg mt-4 transition-transform active:scale-95 flex justify-center items-center gap-2">
-                                {loading ? <i className="fa-solid fa-circle-notch fa-spin"></i> : "BẮT ĐẦU NGAY"}
-                            </button>
+                            <div><label className="text-xs uppercase font-bold text-blue-200 ml-1">Số điện thoại</label><input type="tel" className="w-full mt-1 p-3 rounded-xl bg-white/90 text-gray-900 font-bold" placeholder="09xxxxxxx" value={phone} onChange={e => setPhone(e.target.value)} /></div>
+                            <div><label className="text-xs uppercase font-bold text-blue-200 ml-1">Họ và Tên</label><input type="text" className="w-full mt-1 p-3 rounded-xl bg-white/90 text-gray-900" placeholder="Nguyễn Văn A" value={name} onChange={e => setName(e.target.value)} /></div>
+                            <button type="submit" className="w-full py-4 bg-yellow-400 text-blue-900 font-bold rounded-xl mt-4 flex justify-center items-center gap-2">{loading ? <i className="fa-solid fa-spinner fa-spin"></i> : "BẮT ĐẦU"}</button>
                         </div>
                     </form>
                 </div>
@@ -172,295 +154,389 @@
         // --- MAIN APP ---
         function App() {
             const [user, setUser] = useState(null);
-            const [view, setView] = useState('home'); // home, scanner
+            const [activeTab, setActiveTab] = useState('home'); // home, rewards
+            const [isScanning, setIsScanning] = useState(false); // Controls Scanner Overlay
             const [points, setPoints] = useState(0);
             const [history, setHistory] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [modal, setModal] = useState(null); 
+            const [modal, setModal] = useState(null);
             const [manualCode, setManualCode] = useState('');
+            const [filterType, setFilterType] = useState('all'); // all, scan, redeem
             
-            // Refs
             const scannerRef = useRef(null);
-            const processingRef = useRef(false); // KHÓA ĐỂ CHỐNG QUÉT LIÊN TỤC
+            const processingRef = useRef(false); // Lock for scanner
 
-            // 1. Check Login
+            // Initial Login Check
             useEffect(() => {
                 const stored = localStorage.getItem('paint_user');
                 if (stored) setUser(JSON.parse(stored));
             }, []);
 
-            // 2. Listen to Realtime Data
+            // Realtime Listeners
             useEffect(() => {
                 if (!user || !window.fb) return;
                 const { db, doc, onSnapshot, collection, query, where, orderBy, limit, appId } = window.fb;
 
-                // Listen User Doc
                 const unsubUser = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'members', user.id), (doc) => {
                     if (doc.exists()) setPoints(doc.data().points || 0);
                 });
 
-                // Listen History
-                const q = query(
-                    collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), 
-                    where('user_phone', '==', user.phone),
-                    limit(5)
-                );
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), where('user_phone', '==', user.phone), limit(50)); // Increased limit
                 const unsubHist = onSnapshot(q, (snap) => {
-                    let data = snap.docs.map(d => d.data());
+                    let data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                     data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                     setHistory(data);
                 });
 
                 return () => { unsubUser(); unsubHist(); };
             }, [user]);
+            
+            const canRedeemAny = useMemo(() => {
+                return REWARDS_LIST.some(r => points >= r.points);
+            }, [points]);
 
-            // --- FUNCTIONS ---
-            const handleLogout = () => {
-                if(confirm("Bạn muốn đăng xuất?")) {
-                    localStorage.removeItem('paint_user');
-                    setUser(null);
-                }
-            }
+            const filteredHistory = useMemo(() => {
+                if (filterType === 'all') return history;
+                if (filterType === 'scan') return history.filter(item => !item.action.includes('redeem'));
+                if (filterType === 'redeem') return history.filter(item => item.action.includes('redeem'));
+                return history;
+            }, [history, filterType]);
+
+            // --- ACTIONS ---
+            const handleLogout = () => { if(confirm("Đăng xuất?")) { localStorage.removeItem('paint_user'); setUser(null); } };
 
             const processCode = async (codeStr) => {
-                // [QUAN TRỌNG] Kiểm tra khóa: Nếu đang xử lý thì chặn ngay
                 if (processingRef.current) return;
-                processingRef.current = true;
+                processingRef.current = true; // Lock
 
-                let finalCode = codeStr;
-                if (codeStr.includes('=')) finalCode = codeStr.split('=').pop();
+                let finalCode = codeStr.includes('=') ? codeStr.split('=').pop() : codeStr;
                 finalCode = finalCode.trim().toUpperCase();
 
-                if (!finalCode) {
-                    processingRef.current = false;
-                    return;
-                }
+                if (!finalCode) { processingRef.current = false; return; }
 
                 setLoading(true);
-
-                // Tắt Camera an toàn trước khi xử lý DB
-                if (scannerRef.current) {
-                    try {
-                        await scannerRef.current.stop();
-                        scannerRef.current.clear();
-                        scannerRef.current = null;
-                    } catch (e) {
-                        console.error("Stop error:", e);
-                    }
-                }
-                if (view === 'scanner') setView('home');
+                // Note: We do NOT stop the scanner here, allowing continuous flow
 
                 try {
                     const { db, doc, runTransaction, serverTimestamp, collection, addDoc, appId } = window.fb;
-                    
                     const tempCodeRef = doc(db, 'artifacts', appId, 'public', 'data', 'qr_codes', finalCode);
                     const memberRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', user.id);
                     const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'scan_history');
 
-                    // THỰC HIỆN TRANSACTION (Đọc trước - Ghi sau)
                     const result = await runTransaction(db, async (transaction) => {
-                        // 1. READ ALL FIRST
-                        const codeDoc = await transaction.get(tempCodeRef); 
+                        const codeDoc = await transaction.get(tempCodeRef);
                         const memberDoc = await transaction.get(memberRef);
 
-                        if (!codeDoc.exists()) throw { code: 'not-found', message: "Mã không tồn tại trong hệ thống." };
-                        
+                        if (!codeDoc.exists()) throw { message: "Mã không tồn tại." };
                         const codeData = codeDoc.data();
-                        if (codeData.status === 'used') throw { code: 'used', message: "Mã này đã được sử dụng rồi!" };
-                        if (codeData.status !== 'active') throw { code: 'inactive', message: "Mã chưa được kích hoạt." };
+                        if (codeData.status === 'used') throw { message: "Mã đã sử dụng." };
+                        if (codeData.status !== 'active') throw { message: "Mã chưa kích hoạt." };
 
                         const newPoints = (codeData.points || 0);
                         const currentPoints = memberDoc.exists() ? (memberDoc.data().points || 0) : 0;
-                        
-                        // 2. WRITE ALL LAST
-                        transaction.update(tempCodeRef, { 
-                            status: 'used',
-                            usedBy: user.id,
-                            usedAt: serverTimestamp()
-                        });
-                        transaction.update(memberRef, { points: currentPoints + newPoints });
 
+                        transaction.update(tempCodeRef, { status: 'used', usedBy: user.id, usedAt: serverTimestamp() });
+                        transaction.update(memberRef, { points: currentPoints + newPoints });
                         return { points: newPoints };
                     });
 
-                    // Log history (ngoài transaction)
                     await addDoc(historyRef, {
-                        user_name: user.name,
-                        user_phone: user.phone,
-                        code: finalCode,
-                        action: 'scan',
-                        points: result.points,
-                        timestamp: serverTimestamp(),
-                        status: 'success'
+                        user_name: user.name, user_phone: user.phone, code: finalCode, action: 'scan', 
+                        points: result.points, timestamp: serverTimestamp(), status: 'success'
                     });
 
                     setModal({
                         type: 'success',
-                        title: 'Tích điểm thành công!',
+                        title: 'Thành công!',
                         content: (
                             <div className="text-center">
-                                <div className="text-6xl mb-4">🎉</div>
-                                <p className="text-gray-600 mb-2">Bạn vừa nhận được</p>
-                                <p className="text-4xl font-bold text-green-600 mb-2">+{result.points} Điểm</p>
-                                <p className="text-sm text-gray-500">Mã: {finalCode}</p>
+                                <div className="text-6xl mb-4 animate-bounce">🎉</div>
+                                <p className="text-gray-600">Bạn nhận được</p>
+                                <p className="text-4xl font-bold text-green-600">+{result.points} Điểm</p>
                             </div>
                         )
                     });
 
                 } catch (err) {
-                    let displayMsg = "Lỗi hệ thống không xác định.";
-                    if (err.message) displayMsg = err.message;
-                    if (err.code === 'permission-denied') displayMsg = "Lỗi quyền truy cập (Permission).";
-                    
                     setModal({
                         type: 'error',
                         title: 'Thất bại',
                         content: (
                             <div className="text-center">
                                 <div className="text-5xl mb-4 text-red-500"><i className="fa-solid fa-circle-xmark"></i></div>
-                                <p className="text-lg font-medium text-gray-800">{displayMsg}</p>
+                                <p className="font-medium">{err.message || "Lỗi hệ thống"}</p>
                                 <p className="text-sm text-gray-500 mt-2">Mã: {finalCode}</p>
                             </div>
                         )
                     });
-
                 } finally {
                     setLoading(false);
                     setManualCode('');
-                    // Mở khóa sau 1 giây để tránh double-click
-                    setTimeout(() => { processingRef.current = false; }, 1000);
+                    // Do NOT unlock processingRef immediately here.
+                    // It unlocks when user closes the Modal.
                 }
             };
 
-            const startScanner = () => {
-                setView('scanner');
-                // Reset flag khi bắt đầu quét mới
-                processingRef.current = false;
-                
-                setTimeout(() => {
-                    const html5QrCode = new Html5Qrcode("reader");
-                    scannerRef.current = html5QrCode;
-                    html5QrCode.start(
-                        { facingMode: "environment" }, 
-                        { fps: 10, qrbox: { width: 250, height: 250 } },
-                        (decodedText) => {
-                            // Gọi hàm xử lý (đã có khóa bên trong)
-                            processCode(decodedText);
-                        },
-                        (errorMessage) => { /* ignore */ }
-                    ).catch(err => {
-                        alert("Không thể mở Camera: " + err);
-                        setView('home');
+            const handleRedeem = async (reward) => {
+                if (points < reward.points) return alert("Bạn chưa đủ điểm!");
+                if (!confirm(`Xác nhận đổi: ${reward.name}?\nBạn sẽ bị trừ ${formatMoney(reward.points)} điểm.`)) return;
+
+                setLoading(true);
+                try {
+                    const { db, doc, runTransaction, serverTimestamp, collection, addDoc, appId } = window.fb;
+                    const memberRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', user.id);
+                    const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'scan_history');
+
+                    await runTransaction(db, async (transaction) => {
+                        const memberDoc = await transaction.get(memberRef);
+                        const currentPoints = memberDoc.data().points || 0;
+                        if (currentPoints < reward.points) throw { message: "Không đủ điểm số dư" };
+                        
+                        transaction.update(memberRef, { points: currentPoints - reward.points });
                     });
-                }, 100);
-            };
 
-            const stopScanner = () => {
-                if (scannerRef.current) {
-                    scannerRef.current.stop().then(() => {
-                        scannerRef.current.clear();
-                        scannerRef.current = null;
-                    }).catch(console.error);
+                    await addDoc(historyRef, {
+                        user_name: user.name, user_phone: user.phone, action: 'redeem_gift',
+                        gift_name: reward.name, points_deducted: reward.points, 
+                        timestamp: serverTimestamp(), status: 'pending_approval' // TRẠNG THÁI CHỜ DUYỆT
+                    });
+
+                    setModal({
+                        type: 'success',
+                        title: 'Yêu cầu đã gửi!',
+                        content: (
+                            <div className="text-center">
+                                <div className="text-5xl mb-4 text-blue-500"><i className="fa-solid fa-hourglass-half fa-spin-pulse"></i></div>
+                                <p className="text-gray-700 font-bold">Đang chờ duyệt</p>
+                                <p className="text-sm text-gray-500 mt-2">Yêu cầu đổi <b>{reward.name}</b> đã được gửi. Chúng tôi sẽ thông báo khi quà được giao.</p>
+                            </div>
+                        )
+                    });
+                    
+                    // Switch to history tab (redeem filter) to see status
+                    setFilterType('redeem');
+
+                } catch (err) {
+                    alert("Lỗi: " + err.message);
+                } finally {
+                    setLoading(false);
                 }
-                setView('home');
+            };
+            
+            const handleConfirmReceipt = async (historyId) => {
+                 if (!confirm("Xác nhận bạn đã nhận được quà?")) return;
+                 setLoading(true);
+                 try {
+                     const { db, doc, updateDoc, appId } = window.fb;
+                     const historyRef = doc(db, 'artifacts', appId, 'public', 'data', 'scan_history', historyId);
+                     await updateDoc(historyRef, { status: 'completed' });
+                     alert("Cảm ơn bạn! Trạng thái đã cập nhật.");
+                 } catch(err) {
+                     alert("Lỗi: " + err.message);
+                 } finally {
+                     setLoading(false);
+                 }
             };
 
-            // --- RENDER ---
+            const toggleScanner = () => {
+                if (isScanning) {
+                    // STOP
+                    if (scannerRef.current) {
+                        scannerRef.current.stop().then(() => {
+                            scannerRef.current.clear();
+                            scannerRef.current = null;
+                        }).catch(console.error);
+                    }
+                    setIsScanning(false);
+                } else {
+                    // START
+                    setIsScanning(true);
+                    processingRef.current = false;
+                    setTimeout(() => {
+                        const html5QrCode = new Html5Qrcode("reader");
+                        scannerRef.current = html5QrCode;
+                        html5QrCode.start(
+                            { facingMode: "environment" }, 
+                            { fps: 15, qrbox: { width: 250, height: 250 } },
+                            (decodedText) => processCode(decodedText),
+                            () => {}
+                        ).catch(err => {
+                            alert("Lỗi Camera: " + err);
+                            setIsScanning(false);
+                        });
+                    }, 200);
+                }
+            };
+
+            const closeModal = () => {
+                setModal(null);
+                // UNLOCK SCANNING when modal closes
+                processingRef.current = false;
+            };
+
             if (!user) return <LoginScreen onLogin={setUser} />;
 
             return (
-                <div className="flex flex-col h-full bg-gray-50">
+                <div className="flex flex-col h-full bg-gray-50 relative">
                     {loading && <Loading msg="Đang xử lý..." />}
-                    {modal && <Modal title={modal.title} type={modal.type} onClose={() => setModal(null)}>{modal.content}</Modal>}
+                    {modal && <Modal title={modal.title} type={modal.type} onClose={closeModal}>{modal.content}</Modal>}
 
-                    {/* TOP HEADER */}
-                    <div className="bg-blue-600 text-white p-6 pb-12 rounded-b-3xl shadow-lg relative z-10">
-                        <div className="flex justify-between items-start mb-6">
-                            <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-xl font-bold border-2 border-white/30">
-                                    <i className="fa-solid fa-user"></i>
+                    {/* MAIN CONTENT AREA */}
+                    <div className="flex-1 overflow-hidden flex flex-col pb-20">
+                        {/* HEADER */}
+                        <div className="bg-blue-600 text-white p-6 pb-10 rounded-b-3xl shadow-lg relative z-10 shrink-0">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold border border-white/30"><i className="fa-solid fa-user"></i></div>
+                                    <div className="leading-tight">
+                                        <div className="font-bold">{user.name}</div>
+                                        <div className="text-blue-200 text-xs">{user.phone}</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <div className="font-bold text-lg">{user.name}</div>
-                                    <div className="text-blue-200 text-sm">{user.phone}</div>
-                                </div>
+                                <button onClick={handleLogout} className="text-blue-200 hover:text-white"><i className="fa-solid fa-right-from-bracket"></i></button>
                             </div>
-                            <button onClick={handleLogout} className="text-blue-200 hover:text-white"><i className="fa-solid fa-right-from-bracket text-xl"></i></button>
-                        </div>
-                        
-                        <div className="text-center">
-                            <div className="text-blue-100 text-sm mb-1">Tổng điểm tích lũy</div>
-                            <div className="text-5xl font-bold tracking-tight text-white drop-shadow-md">
-                                {formatMoney(points)}
+                            <div className="text-center">
+                                <div className="text-blue-100 text-xs uppercase tracking-wide">Điểm tích lũy</div>
+                                <div className="text-5xl font-bold tracking-tight text-white drop-shadow-md">{formatMoney(points)}</div>
                             </div>
                         </div>
-                    </div>
 
-                    {/* MAIN ACTIONS */}
-                    <div className="px-4 -mt-8 relative z-20">
-                        <div className="bg-white rounded-2xl shadow-xl p-4 flex items-center justify-between gap-4">
-                            <button onClick={startScanner} className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-blue-900 py-4 rounded-xl font-bold shadow-sm flex flex-col items-center gap-2 transition-transform active:scale-95">
-                                <i className="fa-solid fa-qrcode text-2xl"></i>
-                                Quét QR
-                            </button>
-                            <div className="w-px h-12 bg-gray-200"></div>
-                            <div className="flex-1">
-                                <div className="text-xs text-gray-500 font-bold mb-1 ml-1 uppercase">Nhập mã tay</div>
-                                <div className="flex gap-2">
-                                    <input type="text" className="w-full bg-gray-100 border-0 rounded-lg px-3 py-2 text-sm font-mono uppercase focus:ring-2 focus:ring-blue-500 outline-none" placeholder="CODE..." value={manualCode} onChange={e => setManualCode(e.target.value.toUpperCase())} />
-                                    <button onClick={() => processCode(manualCode)} className="bg-blue-600 text-white px-3 rounded-lg"><i className="fa-solid fa-arrow-right"></i></button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* HISTORY LIST */}
-                    <div className="flex-1 overflow-y-auto px-4 py-6">
-                        <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                            <i className="fa-solid fa-clock-rotate-left text-blue-500"></i> Hoạt động gần đây
-                        </h3>
-                        <div className="space-y-3">
-                            {history.length === 0 ? (
-                                <div className="text-center text-gray-400 py-10">
-                                    <i className="fa-solid fa-ghost text-4xl mb-2"></i>
-                                    <p>Chưa có lịch sử</p>
-                                </div>
-                            ) : (
-                                history.map((item, idx) => (
-                                    <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${item.action === 'redeem_gift' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
-                                                <i className={`fa-solid ${item.action === 'redeem_gift' ? 'fa-gift' : 'fa-check'}`}></i>
+                        {/* TABS CONTENT */}
+                        <div className="flex-1 overflow-y-auto -mt-6 pt-8 px-4 relative z-0">
+                            {activeTab === 'home' ? (
+                                <div className="space-y-6 pb-6">
+                                    {/* Action Card */}
+                                    <div className="bg-white rounded-2xl shadow-md p-4 flex gap-4">
+                                        <button onClick={toggleScanner} className="flex-1 bg-yellow-400 text-blue-900 py-3 rounded-xl font-bold flex flex-col items-center gap-1 shadow-sm active:scale-95 transition-transform">
+                                            <i className="fa-solid fa-qrcode text-xl"></i> Quét Mã
+                                        </button>
+                                        <div className="flex-1 flex flex-col justify-center gap-2">
+                                            <div className="text-xs font-bold text-gray-500 uppercase">Nhập tay</div>
+                                            <div className="flex gap-2">
+                                                <input type="text" className="w-full bg-gray-100 rounded px-2 text-sm uppercase border border-gray-200" placeholder="CODE" value={manualCode} onChange={e => setManualCode(e.target.value)} />
+                                                <button onClick={() => processCode(manualCode)} className="bg-blue-600 text-white w-8 rounded flex items-center justify-center"><i className="fa-solid fa-arrow-right"></i></button>
                                             </div>
-                                            <div>
-                                                <div className="font-bold text-gray-800 text-sm">
-                                                    {item.action === 'redeem_gift' ? 'Đổi quà' : `Mã: ${item.code}`}
-                                                </div>
-                                                <div className="text-xs text-gray-400">
-                                                    {item.timestamp ? new Date(item.timestamp.seconds * 1000).toLocaleString('vi-VN') : 'Vừa xong'}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className={`font-bold ${item.action === 'redeem_gift' ? 'text-red-500' : 'text-green-600'}`}>
-                                            {item.action === 'redeem_gift' ? '-' : '+'}{item.points || item.points_deducted}
                                         </div>
                                     </div>
-                                ))
+
+                                    {/* History */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><i className="fa-solid fa-clock-rotate-left text-blue-500"></i> Lịch sử</h3>
+                                            
+                                            {/* History Filters */}
+                                            <div className="flex bg-gray-200 rounded-lg p-0.5">
+                                                <button onClick={() => setFilterType('all')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${filterType === 'all' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>Tất cả</button>
+                                                <button onClick={() => setFilterType('scan')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${filterType === 'scan' ? 'bg-white shadow text-green-600' : 'text-gray-500'}`}>Nạp điểm</button>
+                                                <button onClick={() => setFilterType('redeem')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${filterType === 'redeem' ? 'bg-white shadow text-red-600' : 'text-gray-500'}`}>Đổi quà</button>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            {filteredHistory.length === 0 ? <p className="text-center text-gray-400 py-4 text-sm">Chưa có dữ liệu.</p> : 
+                                            filteredHistory.map((item, idx) => (
+                                                <div key={idx} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2">
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${item.action.includes('redeem') ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
+                                                                <i className={`fa-solid ${item.action.includes('redeem') ? 'fa-gift' : 'fa-check'}`}></i>
+                                                            </div>
+                                                            <div>
+                                                                <div className="font-bold text-gray-800 text-sm">{item.action.includes('redeem') ? `Đổi: ${item.gift_name}` : `Mã: ${item.code}`}</div>
+                                                                <div className="text-xs text-gray-400">{item.timestamp ? new Date(item.timestamp.seconds * 1000).toLocaleString('vi-VN') : '...'}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className={`font-bold ${item.action.includes('redeem') ? 'text-red-500' : 'text-green-600'}`}>
+                                                            {item.action.includes('redeem') ? '-' : '+'}{item.points || item.points_deducted}
+                                                        </div>
+                                                    </div>
+                                                    {item.action === 'redeem_gift' && (
+                                                        <div className="ml-12 text-sm border-t border-dashed border-gray-100 pt-2 mt-1">
+                                                            <div className="flex justify-between items-center">
+                                                                {item.status === 'pending_approval' && <span className="text-orange-500 font-bold bg-orange-100 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-hourglass-half"></i> Chờ duyệt</span>}
+                                                                {item.status === 'shipping' && <span className="text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-truck"></i> Đang giao</span>}
+                                                                {item.status === 'completed' && <span className="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-check-circle"></i> Đã nhận</span>}
+                                                                {item.status === 'success' && <span className="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-check-circle"></i> Thành công</span>}
+                                                                
+                                                                {/* Only show "Confirm Receipt" button if shipping */}
+                                                                {item.status === 'shipping' && (
+                                                                    <button onClick={() => handleConfirmReceipt(item.id)} className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg font-bold shadow animate-pulse">
+                                                                        Đã nhận quà
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 pb-6">
+                                    <h3 className="font-bold text-gray-700 text-center uppercase tracking-wide">Kho Quà Tặng</h3>
+                                    <div className="grid grid-cols-1 gap-4">
+                                        {REWARDS_LIST.map(reward => (
+                                            <div key={reward.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl ${reward.color}`}>
+                                                    <i className={`fa-solid ${reward.icon}`}></i>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="font-bold text-gray-800">{reward.name}</div>
+                                                    <div className="text-blue-600 font-bold text-sm">{formatMoney(reward.points)} điểm</div>
+                                                </div>
+                                                <button 
+                                                    onClick={() => handleRedeem(reward)}
+                                                    disabled={points < reward.points}
+                                                    className={`px-4 py-2 rounded-lg font-bold text-xs ${points >= reward.points ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                                >
+                                                    Đổi ngay
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </div>
 
-                    {/* SCANNER OVERLAY */}
-                    {view === 'scanner' && (
-                        <div className="fixed inset-0 z-50 bg-black flex flex-col">
-                            <div className="p-4 flex justify-between items-center text-white">
-                                <h3 className="font-bold text-lg">Quét mã QR</h3>
-                                <button onClick={stopScanner} className="bg-white/20 p-2 rounded-full w-10 h-10"><i className="fa-solid fa-xmark"></i></button>
+                    {/* BOTTOM NAV */}
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-2 pb-safe z-40 flex justify-between items-center text-xs font-bold text-gray-400">
+                        <button onClick={() => { setActiveTab('home'); setIsScanning(false); }} className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'home' && !isScanning ? 'text-blue-600' : ''}`}>
+                            <i className="fa-solid fa-house text-xl"></i> Trang chủ
+                        </button>
+                        
+                        <div className="relative -top-6">
+                            <button onClick={toggleScanner} className="bg-blue-600 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 transform transition-transform active:scale-90 border-4 border-gray-50">
+                                <i className="fa-solid fa-qrcode text-2xl"></i>
+                            </button>
+                        </div>
+                        
+                        <button onClick={() => { setActiveTab('rewards'); setIsScanning(false); }} className={`relative flex flex-col items-center gap-1 p-2 ${activeTab === 'rewards' ? 'text-blue-600' : ''}`}>
+                            <i className="fa-solid fa-gift text-xl"></i> Đổi quà
+                            {canRedeemAny && <span className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
+                        </button>
+                    </div>
+
+                    {/* SCANNER OVERLAY (FULLSCREEN) */}
+                    {isScanning && (
+                        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
+                            <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-10">
+                                <div className="bg-black/40 text-white px-3 py-1 rounded-full text-sm backdrop-blur-md">Quét mã QR</div>
+                                <button onClick={toggleScanner} className="w-10 h-10 bg-white/20 rounded-full text-white flex items-center justify-center backdrop-blur-md"><i className="fa-solid fa-xmark"></i></button>
                             </div>
-                            <div className="flex-1 flex items-center justify-center relative bg-black">
+                            <div className="flex-1 bg-black relative">
                                 <div id="reader"></div>
-                                <div className="absolute pointer-events-none border-2 border-yellow-400 w-64 h-64 rounded-xl opacity-50"></div>
-                                <p className="absolute bottom-10 text-white/80 text-center w-full">Di chuyển camera vào mã QR</p>
+                                {/* Guide Overlay */}
+                                <div className="absolute inset-0 border-[40px] border-black/50 pointer-events-none flex items-center justify-center">
+                                    <div className="w-64 h-64 border-2 border-yellow-400 rounded-lg relative opacity-80">
+                                        <div className="absolute top-0 left-0 w-4 h-4 border-l-4 border-t-4 border-yellow-400 -ml-1 -mt-1"></div>
+                                        <div className="absolute top-0 right-0 w-4 h-4 border-r-4 border-t-4 border-yellow-400 -mr-1 -mt-1"></div>
+                                        <div className="absolute bottom-0 left-0 w-4 h-4 border-l-4 border-b-4 border-yellow-400 -ml-1 -mb-1"></div>
+                                        <div className="absolute bottom-0 right-0 w-4 h-4 border-r-4 border-b-4 border-yellow-400 -mr-1 -mb-1"></div>
+                                    </div>
+                                </div>
+                                <div className="absolute bottom-20 left-0 right-0 text-center text-white/80 text-sm">Di chuyển camera vào mã QR</div>
                             </div>
                         </div>
                     )}
