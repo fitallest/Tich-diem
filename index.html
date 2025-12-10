@@ -242,7 +242,27 @@
                                 }
                             ).catch(err => {
                                 console.error("Start failed", err);
-                                alert("Không thể bật camera. Vui lòng cấp quyền hoặc thử lại.");
+                                let errorMsg = "Không thể bật camera.";
+                                let isSecure = window.isSecureContext; // Check HTTPS
+
+                                if (err.name === "NotAllowedError" || err.message?.includes("Permission")) {
+                                    errorMsg = "Quyền truy cập Camera bị chặn. Vui lòng vào Cài đặt trình duyệt > Cho phép Camera cho trang web này.";
+                                } else if (err.name === "NotFoundError") {
+                                    errorMsg = "Không tìm thấy Camera trên thiết bị.";
+                                } else if (!isSecure && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                                    errorMsg = "LỖI BẢO MẬT: Camera chỉ hoạt động trên tên miền HTTPS (có ổ khóa). Trang web hiện tại không an toàn.";
+                                }
+
+                                setModal({
+                                    type: 'error',
+                                    title: 'Lỗi Camera',
+                                    content: (
+                                        <div className="text-center">
+                                            <div className="text-4xl mb-2 text-red-500"><i className="fa-solid fa-video-slash"></i></div>
+                                            <p>{errorMsg}</p>
+                                        </div>
+                                    )
+                                });
                                 setIsScanning(false);
                             });
                         } catch (e) {
@@ -568,7 +588,7 @@
                         <button onClick={() => { setActiveTab('rewards'); setIsScanning(false); }} className={`relative flex flex-col items-center gap-1 p-2 ${activeTab === 'rewards' ? 'text-blue-600' : ''}`}>
                             <i className="fa-solid fa-gift text-xl"></i> Đổi quà
                             {canRedeemAny && <span className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
-                        </button>
+                         </button>
                     </div>
 
                     {/* SCANNER OVERLAY (FULLSCREEN) */}
