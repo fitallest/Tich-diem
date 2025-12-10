@@ -59,9 +59,14 @@
         .modal-exit { opacity: 1; }
         .modal-exit-active { opacity: 0; transition: opacity 200ms; }
 
-        /* Scanner */
-        #reader { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: #000; }
-        #reader video { object-fit: cover; width: 100% !important; height: 100% !important; border-radius: 12px; }
+        /* Scanner Optimization */
+        #reader { width: 100%; height: 100%; overflow: hidden; background: #000; position: relative; }
+        /* Force video to fill container without distortion */
+        #reader video { 
+            object-fit: cover; 
+            width: 100% !important; 
+            height: 100% !important; 
+        }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-gray-800">
@@ -207,19 +212,15 @@
                 return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
-            // --- SCANNER LIFECYCLE MANAGEMENT (FIX CAMERA ERROR) ---
+            // --- SCANNER LIFECYCLE MANAGEMENT (OPTIMIZED) ---
             useEffect(() => {
                 let html5QrCode;
                 let isMounted = true;
 
                 if (isScanning) {
-                    // Small delay to ensure DOM is painted
                     const timer = setTimeout(() => {
                         if (!isMounted) return;
-                        
-                        // Check if element exists
                         if (!document.getElementById("reader")) {
-                            console.error("Reader element not found");
                             setIsScanning(false);
                             return;
                         }
@@ -228,29 +229,50 @@
                             html5QrCode = new Html5Qrcode("reader");
                             scannerRef.current = html5QrCode;
                             
-                            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+                            // OPTIMIZATION: Dynamic QR Box based on screen size
+                            const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
+                                // 70% of smaller dimension
+                                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                                const size = Math.floor(minEdge * 0.7);
+                                return {
+                                    width: size,
+                                    height: size
+                                };
+                            };
+
+                            const config = { 
+                                fps: 15, // Higher FPS for smoother scan
+                                qrbox: qrboxFunction,
+                                aspectRatio: window.innerHeight / window.innerWidth, // Match screen aspect ratio
+                                videoConstraints: {
+                                    facingMode: "environment",
+                                    focusMode: "continuous", // Try continuous focus
+                                    // Request HD resolution for better decoding
+                                    width: { min: 640, ideal: 1280, max: 1920 },
+                                    height: { min: 480, ideal: 720, max: 1080 }
+                                }
+                            };
                             
                             html5QrCode.start(
                                 { facingMode: "environment" }, 
                                 config,
                                 (decodedText) => {
-                                    // Handle Success
+                                    // SUCCESS
+                                    if(navigator.vibrate) navigator.vibrate(200); // Haptic feedback
                                     processCode(decodedText);
                                 },
-                                (errorMessage) => {
-                                    // Handle Error (Ignore per frame errors)
-                                }
+                                (errorMessage) => { /* Ignore frame errors */ }
                             ).catch(err => {
                                 console.error("Start failed", err);
                                 let errorMsg = "Không thể bật camera.";
-                                let isSecure = window.isSecureContext; // Check HTTPS
+                                let isSecure = window.isSecureContext;
 
                                 if (err.name === "NotAllowedError" || err.message?.includes("Permission")) {
                                     errorMsg = "Quyền truy cập Camera bị chặn. Vui lòng vào Cài đặt trình duyệt > Cho phép Camera cho trang web này.";
                                 } else if (err.name === "NotFoundError") {
                                     errorMsg = "Không tìm thấy Camera trên thiết bị.";
                                 } else if (!isSecure && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                                    errorMsg = "LỖI BẢO MẬT: Camera chỉ hoạt động trên tên miền HTTPS (có ổ khóa). Trang web hiện tại không an toàn.";
+                                    errorMsg = "LỖI BẢO MẬT: Camera chỉ hoạt động trên tên miền HTTPS (có ổ khóa).";
                                 }
 
                                 setModal({
@@ -306,7 +328,6 @@
                 if (!finalCode) { processingRef.current = false; return; }
 
                 setLoading(true);
-                // Note: We do NOT stop the scanner here, allowing continuous flow
 
                 try {
                     const { db, doc, runTransaction, serverTimestamp, collection, addDoc, appId } = window.fb;
@@ -364,7 +385,6 @@
                     setLoading(false);
                     setManualCode('');
                     // Do NOT unlock processingRef immediately here.
-                    // It unlocks when user closes the Modal.
                 }
             };
 
@@ -389,7 +409,7 @@
                     await addDoc(historyRef, {
                         user_name: user.name, user_phone: user.phone, action: 'redeem_gift',
                         gift_name: reward.name, points_deducted: reward.points, 
-                        timestamp: serverTimestamp(), status: 'pending_approval' // TRẠNG THÁI CHỜ DUYỆT
+                        timestamp: serverTimestamp(), status: 'pending_approval'
                     });
 
                     setModal({
@@ -403,10 +423,7 @@
                             </div>
                         )
                     });
-                    
-                    // Switch to history tab (redeem filter) to see status
                     setFilterType('redeem');
-
                 } catch (err) {
                     alert("Lỗi: " + err.message);
                 } finally {
@@ -432,17 +449,14 @@
             const toggleScanner = () => {
                 if (isScanning) {
                     setIsScanning(false);
-                    // Cleanup handled by useEffect
                 } else {
                     setIsScanning(true);
                     processingRef.current = false;
-                    // Init handled by useEffect
                 }
             };
 
             const closeModal = () => {
                 setModal(null);
-                // UNLOCK SCANNING when modal closes
                 processingRef.current = false;
             };
 
@@ -530,7 +544,6 @@
                                                                 {item.status === 'completed' && <span className="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-check-circle"></i> Đã nhận</span>}
                                                                 {item.status === 'success' && <span className="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs"><i className="fa-solid fa-check-circle"></i> Thành công</span>}
                                                                 
-                                                                {/* Only show "Confirm Receipt" button if shipping */}
                                                                 {item.status === 'shipping' && (
                                                                     <button onClick={() => handleConfirmReceipt(item.id)} className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg font-bold shadow animate-pulse">
                                                                         Đã nhận quà
