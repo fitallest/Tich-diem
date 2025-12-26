@@ -5,19 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tích Điểm Sơn Tốt VN</title>
     
-    <!-- Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
-    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- QR Scanner Library -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
-    <!-- Firebase Config -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -60,12 +56,12 @@
         .modal-exit-active { opacity: 0; transition: opacity 200ms; }
 
         /* Scanner Optimization */
-        #reader { width: 100%; height: 100%; overflow: hidden; background: #000; position: relative; }
-        /* Force video to fill container without distortion */
+        #reader { width: 100%; height: 100%; background: #000; }
         #reader video { 
             object-fit: cover; 
-            width: 100% !important; 
-            height: 100% !important; 
+            width: 100%; 
+            height: 100%; 
+            border-radius: 0;
         }
     </style>
 </head>
@@ -177,9 +173,7 @@
                     const codeFromUrl = params.get('c');
                     
                     if (codeFromUrl) {
-                        // Clean up URL immediately so we don't process again on refresh
                         window.history.replaceState({}, document.title, window.location.pathname);
-                        
                         console.log("Auto processing code:", codeFromUrl);
                         processCode(codeFromUrl);
                     }
@@ -195,14 +189,13 @@
                     if (doc.exists()) setPoints(doc.data().points || 0);
                 });
 
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), where('user_phone', '==', user.phone), limit(50)); // Increased limit
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), where('user_phone', '==', user.phone), limit(50));
                 const unsubHist = onSnapshot(q, (snap) => {
                     let data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                     data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                     setHistory(data);
                 }, (err) => console.log('History error safe catch'));
                 
-                // Fetch Reward Templates from Firebase
                 const unsubRewards = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reward_templates'), (snap) => {
                      const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                      data.sort((a, b) => (a.points || 0) - (b.points || 0));
@@ -212,78 +205,84 @@
                 return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
-            // --- SCANNER LIFECYCLE MANAGEMENT (OPTIMIZED) ---
+            // --- SCANNER LIFECYCLE MANAGEMENT (IOS FIXED) ---
             useEffect(() => {
                 let html5QrCode;
                 let isMounted = true;
+                let fixIosInterval = null; // Biến để lưu vòng lặp fix lỗi iOS
 
                 if (isScanning) {
                     const timer = setTimeout(() => {
                         if (!isMounted) return;
-                        if (!document.getElementById("reader")) {
+                        const readerElem = document.getElementById("reader");
+                        if (!readerElem) {
                             setIsScanning(false);
                             return;
                         }
 
                         try {
+                            readerElem.innerHTML = "";
+                            
+                            // Tạo instance mới
                             html5QrCode = new Html5Qrcode("reader");
                             scannerRef.current = html5QrCode;
                             
-                            // OPTIMIZATION: Dynamic QR Box based on screen size
-                            const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
-                                // 70% of smaller dimension
-                                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                                const size = Math.floor(minEdge * 0.7);
-                                return {
-                                    width: size,
-                                    height: size
-                                };
-                            };
-
+                            // CẤU HÌNH FIX CHO IOS
                             const config = { 
-                                fps: 15, // Higher FPS for smoother scan
-                                qrbox: qrboxFunction,
-                                aspectRatio: window.innerHeight / window.innerWidth, // Match screen aspect ratio
+                                fps: 10, // Giảm FPS xuống 10 để nhẹ máy hơn trên iOS
+                                qrbox: { width: 250, height: 250 }, // Định vùng quét rõ ràng
+                                aspectRatio: 1.0, // Quan trọng: Tỉ lệ 1:1 giúp iOS không bị méo hình
+                                experimentalFeatures: {
+                                    useBarCodeDetectorIfSupported: true
+                                },
                                 videoConstraints: {
                                     facingMode: "environment",
-                                    focusMode: "continuous", // Try continuous focus
-                                    // Request HD resolution for better decoding
-                                    width: { min: 640, ideal: 1280, max: 1920 },
-                                    height: { min: 480, ideal: 720, max: 1080 }
+                                    // Bỏ focusMode continuous vì một số iOS bị lỗi màn hình đen
+                                    aspectRatio: 1.0 
                                 }
                             };
                             
+                            // HÀM FIX LỖI VIDEO PLAYER TRÊN IOS
+                            // Chạy liên tục kiểm tra xem thẻ <video> đã hiện ra chưa để thêm thuộc tính playsinline
+                            fixIosInterval = setInterval(() => {
+                                const videoElement = document.querySelector('#reader video');
+                                if (videoElement) {
+                                    if (!videoElement.hasAttribute('playsinline')) {
+                                        videoElement.setAttribute('playsinline', 'true');
+                                        videoElement.setAttribute('webkit-playsinline', 'true');
+                                    }
+                                    // Fix CSS để video lấp đầy khung mà không bị thanh điều khiển che
+                                    videoElement.style.objectFit = "cover"; 
+                                }
+                            }, 500);
+
                             html5QrCode.start(
                                 { facingMode: "environment" }, 
                                 config,
                                 (decodedText) => {
-                                    // SUCCESS
-                                    if(navigator.vibrate) navigator.vibrate(200); // Haptic feedback
+                                    if(navigator.vibrate) navigator.vibrate(200);
+                                    // Tắt scanner ngay khi quét được để tránh quét nhiều lần
+                                    setIsScanning(false); 
                                     processCode(decodedText);
                                 },
-                                (errorMessage) => { /* Ignore frame errors */ }
+                                (errorMessage) => { /* Bỏ qua lỗi từng frame */ }
                             ).catch(err => {
                                 console.error("Start failed", err);
                                 let errorMsg = "Không thể bật camera.";
                                 let isSecure = window.isSecureContext;
 
                                 if (err.name === "NotAllowedError" || err.message?.includes("Permission")) {
-                                    errorMsg = "Quyền truy cập Camera bị chặn. Vui lòng vào Cài đặt trình duyệt > Cho phép Camera cho trang web này.";
+                                    errorMsg = "Quyền truy cập Camera bị chặn. Vui lòng vào Cài đặt > Safari > Camera > Cho phép.";
                                 } else if (err.name === "NotFoundError") {
-                                    errorMsg = "Không tìm thấy Camera trên thiết bị.";
-                                } else if (!isSecure && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                                    errorMsg = "LỖI BẢO MẬT: Camera chỉ hoạt động trên tên miền HTTPS (có ổ khóa).";
+                                    errorMsg = "Không tìm thấy Camera.";
+                                } else if (!isSecure && location.hostname !== 'localhost') {
+                                    errorMsg = "LỖI: Camera yêu cầu HTTPS.";
                                 }
 
                                 setModal({
                                     type: 'error',
                                     title: 'Lỗi Camera',
-                                    content: (
-                                        <div className="text-center">
-                                            <div className="text-4xl mb-2 text-red-500"><i className="fa-solid fa-video-slash"></i></div>
-                                            <p>{errorMsg}</p>
-                                        </div>
-                                    )
+                                    content: (<div className="text-center"><p>{errorMsg}</p></div>)
                                 });
                                 setIsScanning(false);
                             });
@@ -296,6 +295,8 @@
                     return () => {
                         isMounted = false;
                         clearTimeout(timer);
+                        if (fixIosInterval) clearInterval(fixIosInterval); // Xóa vòng lặp fix iOS
+                        
                         if (html5QrCode && html5QrCode.isScanning) {
                             html5QrCode.stop().then(() => html5QrCode.clear()).catch(console.error);
                         }
@@ -384,7 +385,6 @@
                 } finally {
                     setLoading(false);
                     setManualCode('');
-                    // Do NOT unlock processingRef immediately here.
                 }
             };
 
@@ -611,10 +611,14 @@
                                 <div className="bg-black/40 text-white px-3 py-1 rounded-full text-sm backdrop-blur-md">Quét mã QR</div>
                                 <button onClick={toggleScanner} className="w-10 h-10 bg-white/20 rounded-full text-white flex items-center justify-center backdrop-blur-md"><i className="fa-solid fa-xmark"></i></button>
                             </div>
-                            <div className="flex-1 bg-black relative flex flex-col items-center justify-center">
+                            
+                            {/* CAMERA CONTAINER */}
+                            <div className="flex-1 bg-black relative flex flex-col items-center justify-center overflow-hidden">
+                                {/* The scanner video goes here. WE DO NOT PUT OVERLAYS INSIDE HERE */}
                                 <div id="reader"></div>
-                                {/* Guide Overlay */}
-                                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                
+                                {/* CUSTOM OVERLAY - PLACED OUTSIDE READER DIV BUT ABSOLUTE POSITIONED OVER IT */}
+                                <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-20">
                                     <div className="w-64 h-64 border-2 border-yellow-400 rounded-lg relative opacity-80 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
                                         <div className="absolute top-0 left-0 w-4 h-4 border-l-4 border-t-4 border-yellow-400 -ml-1 -mt-1"></div>
                                         <div className="absolute top-0 right-0 w-4 h-4 border-r-4 border-t-4 border-yellow-400 -mr-1 -mt-1"></div>
@@ -622,7 +626,8 @@
                                         <div className="absolute bottom-0 right-0 w-4 h-4 border-r-4 border-b-4 border-yellow-400 -mr-1 -mb-1"></div>
                                     </div>
                                 </div>
-                                <div className="absolute bottom-20 left-0 right-0 text-center text-white/80 text-sm">Di chuyển camera vào mã QR</div>
+                                
+                                <div className="absolute bottom-20 left-0 right-0 text-center text-white/80 text-sm z-20">Di chuyển camera vào mã QR</div>
                             </div>
                         </div>
                     )}
