@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -6,19 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tích Điểm Sơn Tốt VN</title>
     
-    <!-- Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
-    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- QR Scanner Library -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
-    <!-- Firebase Config -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -163,7 +158,7 @@
             const [rewards, setRewards] = useState([]); // Dynamic Rewards
             
             const scannerRef = useRef(null);
-            const processingRef = useRef(false); // Lock for scanner
+            const processingRef = useRef(false); // Lock for scanner logic
 
             // Initial Login Check
             useEffect(() => {
@@ -178,9 +173,7 @@
                     const codeFromUrl = params.get('c');
                     
                     if (codeFromUrl) {
-                        // Clean up URL immediately so we don't process again on refresh
                         window.history.replaceState({}, document.title, window.location.pathname);
-                        
                         console.log("Auto processing code:", codeFromUrl);
                         processCode(codeFromUrl);
                     }
@@ -196,14 +189,13 @@
                     if (doc.exists()) setPoints(doc.data().points || 0);
                 });
 
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), where('user_phone', '==', user.phone), limit(50)); // Increased limit
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'scan_history'), where('user_phone', '==', user.phone), limit(50));
                 const unsubHist = onSnapshot(q, (snap) => {
                     let data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                     data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                     setHistory(data);
                 }, (err) => console.log('History error safe catch'));
                 
-                // Fetch Reward Templates from Firebase
                 const unsubRewards = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reward_templates'), (snap) => {
                      const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                      data.sort((a, b) => (a.points || 0) - (b.points || 0));
@@ -213,88 +205,110 @@
                 return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
-            // --- SCANNER LIFECYCLE MANAGEMENT (OPTIMIZED) ---
+            // --- SCANNER LIFECYCLE MANAGEMENT (IOS FIXED + RE-SCAN FIXED) ---
             useEffect(() => {
                 let html5QrCode;
                 let isMounted = true;
+                let fixIosInterval = null;
+
+                const startScanner = async () => {
+                    // Chờ DOM render xong
+                    await new Promise(r => setTimeout(r, 200));
+                    
+                    if (!isMounted || !isScanning) return;
+                    
+                    const readerElem = document.getElementById("reader");
+                    if (!readerElem) {
+                        setIsScanning(false);
+                        return;
+                    }
+
+                    // Dọn dẹp nội dung cũ
+                    readerElem.innerHTML = "";
+
+                    try {
+                        html5QrCode = new Html5Qrcode("reader");
+                        scannerRef.current = html5QrCode;
+
+                        const config = { 
+                            fps: 10,
+                            qrbox: { width: 250, height: 250 },
+                            aspectRatio: 1.0,
+                            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+                            videoConstraints: { facingMode: "environment", aspectRatio: 1.0 }
+                        };
+
+                        // Fix lỗi hiển thị video player trên iOS
+                        fixIosInterval = setInterval(() => {
+                            const videoElement = document.querySelector('#reader video');
+                            if (videoElement) {
+                                if (!videoElement.hasAttribute('playsinline')) {
+                                    videoElement.setAttribute('playsinline', 'true');
+                                    videoElement.setAttribute('webkit-playsinline', 'true');
+                                }
+                                videoElement.style.objectFit = "cover";
+                            }
+                        }, 500);
+
+                        await html5QrCode.start(
+                            { facingMode: "environment" }, 
+                            config,
+                            async (decodedText) => {
+                                // --- XỬ LÝ KHI QUÉT THÀNH CÔNG ---
+                                if(navigator.vibrate) navigator.vibrate(200);
+                                
+                                // 1. Tạm dừng fix iOS
+                                if (fixIosInterval) clearInterval(fixIosInterval);
+
+                                // 2. Tắt Camera CHỦ ĐỘNG trước khi đóng UI
+                                try {
+                                    if (html5QrCode.isScanning) {
+                                        await html5QrCode.stop();
+                                        html5QrCode.clear();
+                                    }
+                                } catch (err) {
+                                    console.log("Stop error ignored", err);
+                                }
+
+                                // 3. Cập nhật state UI
+                                setIsScanning(false); 
+                                processCode(decodedText);
+                            },
+                            (errorMessage) => { /* ignore frame errors */ }
+                        );
+
+                    } catch (err) {
+                        console.error("Start failed", err);
+                        setIsScanning(false);
+                        if (isMounted) {
+                             let errorMsg = "Không thể khởi động Camera.";
+                             if (err.name === "NotAllowedError") errorMsg = "Vui lòng cấp quyền Camera trong Cài đặt.";
+                             alert(errorMsg);
+                        }
+                    }
+                };
 
                 if (isScanning) {
-                    // Delay slightly to ensure DOM is ready
-                    const timer = setTimeout(() => {
-                        if (!isMounted) return;
-                        const readerElem = document.getElementById("reader");
-                        if (!readerElem) {
-                            setIsScanning(false);
-                            return;
-                        }
-
-                        try {
-                            // Clear previous instances/content
-                            readerElem.innerHTML = "";
-                            
-                            html5QrCode = new Html5Qrcode("reader");
-                            scannerRef.current = html5QrCode;
-                            
-                            // CONFIG: Simple full scan
-                            const config = { 
-                                fps: 15, // Smooth scanning
-                                experimentalFeatures: {
-                                    useBarCodeDetectorIfSupported: true
-                                },
-                                videoConstraints: {
-                                    facingMode: "environment",
-                                    focusMode: "continuous", 
-                                }
-                            };
-                            
-                            html5QrCode.start(
-                                { facingMode: "environment" }, 
-                                config,
-                                (decodedText) => {
-                                    // SUCCESS
-                                    if(navigator.vibrate) navigator.vibrate(200); // Haptic feedback
-                                    processCode(decodedText);
-                                },
-                                (errorMessage) => { /* Ignore frame errors */ }
-                            ).catch(err => {
-                                console.error("Start failed", err);
-                                let errorMsg = "Không thể bật camera.";
-                                let isSecure = window.isSecureContext;
-
-                                if (err.name === "NotAllowedError" || err.message?.includes("Permission")) {
-                                    errorMsg = "Quyền truy cập Camera bị chặn. Vui lòng vào Cài đặt trình duyệt > Cho phép Camera cho trang web này.";
-                                } else if (err.name === "NotFoundError") {
-                                    errorMsg = "Không tìm thấy Camera trên thiết bị.";
-                                } else if (!isSecure && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                                    errorMsg = "LỖI BẢO MẬT: Camera chỉ hoạt động trên tên miền HTTPS (có ổ khóa).";
-                                }
-
-                                setModal({
-                                    type: 'error',
-                                    title: 'Lỗi Camera',
-                                    content: (
-                                        <div className="text-center">
-                                            <div className="text-4xl mb-2 text-red-500"><i className="fa-solid fa-video-slash"></i></div>
-                                            <p>{errorMsg}</p>
-                                        </div>
-                                    )
-                                });
-                                setIsScanning(false);
-                            });
-                        } catch (e) {
-                            console.error("Init failed", e);
-                            setIsScanning(false);
-                        }
-                    }, 100);
-
-                    return () => {
-                        isMounted = false;
-                        clearTimeout(timer);
-                        if (html5QrCode && html5QrCode.isScanning) {
-                            html5QrCode.stop().then(() => html5QrCode.clear()).catch(console.error);
-                        }
-                    };
+                    startScanner();
                 }
+
+                // Cleanup khi component unmount hoặc tắt scanner bằng nút X
+                return () => {
+                    isMounted = false;
+                    if (fixIosInterval) clearInterval(fixIosInterval);
+                    
+                    if (scannerRef.current) {
+                        try {
+                            if (scannerRef.current.isScanning) {
+                                scannerRef.current.stop().then(() => {
+                                    scannerRef.current.clear();
+                                }).catch(err => console.log("Cleanup stop err", err));
+                            } else {
+                                scannerRef.current.clear();
+                            }
+                        } catch (e) { console.log("Cleanup err", e); }
+                    }
+                };
             }, [isScanning]);
 
 
@@ -314,7 +328,7 @@
 
             const processCode = async (codeStr) => {
                 if (processingRef.current) return;
-                processingRef.current = true; // Lock
+                processingRef.current = true; // Lock logic
 
                 let finalCode = codeStr.includes('=') ? codeStr.split('=').pop() : codeStr;
                 finalCode = finalCode.trim().toUpperCase();
@@ -378,7 +392,7 @@
                 } finally {
                     setLoading(false);
                     setManualCode('');
-                    // Do NOT unlock processingRef immediately here.
+                    // processingRef unlocked by Modal Close
                 }
             };
 
@@ -633,4 +647,4 @@
         root.render(<App />);
     </script>
 </body>
-</html>			
+</html>
