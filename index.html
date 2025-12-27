@@ -205,14 +205,13 @@
                 return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
-            // --- SCANNER LIFECYCLE MANAGEMENT (IOS FIXED + RE-SCAN FIXED) ---
+            // --- SCANNER LIFECYCLE MANAGEMENT (OPTIMIZED FOR FOCUS & RESOLUTION) ---
             useEffect(() => {
                 let html5QrCode;
                 let isMounted = true;
                 let fixIosInterval = null;
 
                 const startScanner = async () => {
-                    // Chờ DOM render xong
                     await new Promise(r => setTimeout(r, 200));
                     
                     if (!isMounted || !isScanning) return;
@@ -223,19 +222,26 @@
                         return;
                     }
 
-                    // Dọn dẹp nội dung cũ
                     readerElem.innerHTML = "";
 
                     try {
                         html5QrCode = new Html5Qrcode("reader");
                         scannerRef.current = html5QrCode;
 
+                        // CẤU HÌNH NÂNG CAO ĐỂ TĂNG ĐỘ NÉT
                         const config = { 
                             fps: 10,
                             qrbox: { width: 250, height: 250 },
                             aspectRatio: 1.0,
                             experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                            videoConstraints: { facingMode: "environment", aspectRatio: 1.0 }
+                            videoConstraints: { 
+                                facingMode: "environment",
+                                // Yêu cầu độ phân giải cao hơn để quét được từ xa (tránh lỗi lấy nét khi để gần)
+                                width: { min: 640, ideal: 1280, max: 1920 },
+                                height: { min: 480, ideal: 720, max: 1080 },
+                                focusMode: "continuous", // Cố gắng kích hoạt lấy nét liên tục
+                                aspectRatio: 1.0
+                            }
                         };
 
                         // Fix lỗi hiển thị video player trên iOS
@@ -257,10 +263,9 @@
                                 // --- XỬ LÝ KHI QUÉT THÀNH CÔNG ---
                                 if(navigator.vibrate) navigator.vibrate(200);
                                 
-                                // 1. Tạm dừng fix iOS
                                 if (fixIosInterval) clearInterval(fixIosInterval);
 
-                                // 2. Tắt Camera CHỦ ĐỘNG trước khi đóng UI
+                                // Tắt Camera CHỦ ĐỘNG
                                 try {
                                     if (html5QrCode.isScanning) {
                                         await html5QrCode.stop();
@@ -270,7 +275,6 @@
                                     console.log("Stop error ignored", err);
                                 }
 
-                                // 3. Cập nhật state UI
                                 setIsScanning(false); 
                                 processCode(decodedText);
                             },
@@ -292,7 +296,7 @@
                     startScanner();
                 }
 
-                // Cleanup khi component unmount hoặc tắt scanner bằng nút X
+                // Cleanup
                 return () => {
                     isMounted = false;
                     if (fixIosInterval) clearInterval(fixIosInterval);
@@ -635,7 +639,7 @@
                                     </div>
                                 </div>
                                 
-                                <div className="absolute bottom-20 left-0 right-0 text-center text-white/80 text-sm z-20">Di chuyển camera vào mã QR</div>
+                                <div className="absolute bottom-20 left-0 right-0 text-center text-white/80 text-sm z-20">Giữ camera cách mã 15-20cm</div>
                             </div>
                         </div>
                     )}
