@@ -56,12 +56,13 @@
         .modal-exit-active { opacity: 0; transition: opacity 200ms; }
 
         /* Scanner Optimization */
-        #reader { width: 100%; height: 100%; background: #000; }
+        #reader { width: 100%; height: 100%; background: #000; overflow: hidden; position: relative; }
+        /* Bắt buộc video phải full khung và không hiện control */
         #reader video { 
-            object-fit: cover; 
-            width: 100%; 
-            height: 100%; 
-            border-radius: 0;
+            object-fit: cover !important; 
+            width: 100% !important; 
+            height: 100% !important; 
+            border-radius: 0 !important;
         }
     </style>
 </head>
@@ -205,14 +206,14 @@
                 return () => { unsubUser(); unsubHist(); unsubRewards(); };
             }, [user]);
             
-            // --- SCANNER LIFECYCLE MANAGEMENT (OPTIMIZED FOR FOCUS & RESOLUTION) ---
+            // --- SCANNER LIFECYCLE MANAGEMENT (SIMPLE & STABLE) ---
             useEffect(() => {
                 let html5QrCode;
                 let isMounted = true;
                 let fixIosInterval = null;
 
                 const startScanner = async () => {
-                    await new Promise(r => setTimeout(r, 200));
+                    await new Promise(r => setTimeout(r, 100)); // Đợi một chút cho UI load
                     
                     if (!isMounted || !isScanning) return;
                     
@@ -222,72 +223,65 @@
                         return;
                     }
 
-                    readerElem.innerHTML = "";
+                    readerElem.innerHTML = ""; // Reset khung
 
                     try {
                         html5QrCode = new Html5Qrcode("reader");
                         scannerRef.current = html5QrCode;
 
-                        // CẤU HÌNH NÂNG CAO ĐỂ TĂNG ĐỘ NÉT
+                        // Cấu hình đơn giản nhất để tránh lỗi
                         const config = { 
                             fps: 10,
                             qrbox: { width: 250, height: 250 },
                             aspectRatio: 1.0,
-                            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                            videoConstraints: { 
-                                facingMode: "environment",
-                                // Yêu cầu độ phân giải cao hơn để quét được từ xa (tránh lỗi lấy nét khi để gần)
-                                width: { min: 640, ideal: 1280, max: 1920 },
-                                height: { min: 480, ideal: 720, max: 1080 },
-                                focusMode: "continuous", // Cố gắng kích hoạt lấy nét liên tục
-                                aspectRatio: 1.0
-                            }
+                            // videoConstraints: KHÔNG setting gì cả để mặc định tốt nhất
                         };
 
-                        // Fix lỗi hiển thị video player trên iOS
+                        // --- FIX LỖI POP-UP VIDEO TRÊN IOS ---
+                        // Chạy cực nhanh (50ms) để bắt ngay thẻ video vừa sinh ra
                         fixIosInterval = setInterval(() => {
                             const videoElement = document.querySelector('#reader video');
                             if (videoElement) {
+                                // Ép thuộc tính playsinline để không bị bật ra player riêng
                                 if (!videoElement.hasAttribute('playsinline')) {
                                     videoElement.setAttribute('playsinline', 'true');
                                     videoElement.setAttribute('webkit-playsinline', 'true');
                                 }
+                                // Ép style để full màn hình
                                 videoElement.style.objectFit = "cover";
+                                videoElement.style.width = "100%";
+                                videoElement.style.height = "100%";
                             }
-                        }, 500);
+                        }, 50); // Check mỗi 50ms
 
                         await html5QrCode.start(
                             { facingMode: "environment" }, 
                             config,
                             async (decodedText) => {
-                                // --- XỬ LÝ KHI QUÉT THÀNH CÔNG ---
+                                // --- QUÉT THÀNH CÔNG ---
                                 if(navigator.vibrate) navigator.vibrate(200);
                                 
                                 if (fixIosInterval) clearInterval(fixIosInterval);
 
-                                // Tắt Camera CHỦ ĐỘNG
+                                // Dừng Camera NGAY LẬP TỨC
                                 try {
                                     if (html5QrCode.isScanning) {
                                         await html5QrCode.stop();
                                         html5QrCode.clear();
                                     }
-                                } catch (err) {
-                                    console.log("Stop error ignored", err);
-                                }
+                                } catch (err) { console.log("Stop error ignored", err); }
 
-                                setIsScanning(false); 
-                                processCode(decodedText);
+                                setIsScanning(false); // Đóng UI Scanner
+                                processCode(decodedText); // Xử lý mã
                             },
-                            (errorMessage) => { /* ignore frame errors */ }
+                            (errorMessage) => { /* Bỏ qua lỗi khi đang quét */ }
                         );
 
                     } catch (err) {
                         console.error("Start failed", err);
                         setIsScanning(false);
                         if (isMounted) {
-                             let errorMsg = "Không thể khởi động Camera.";
-                             if (err.name === "NotAllowedError") errorMsg = "Vui lòng cấp quyền Camera trong Cài đặt.";
-                             alert(errorMsg);
+                             alert("Lỗi Camera: " + err.message);
                         }
                     }
                 };
@@ -306,11 +300,11 @@
                             if (scannerRef.current.isScanning) {
                                 scannerRef.current.stop().then(() => {
                                     scannerRef.current.clear();
-                                }).catch(err => console.log("Cleanup stop err", err));
+                                }).catch(e => {});
                             } else {
                                 scannerRef.current.clear();
                             }
-                        } catch (e) { console.log("Cleanup err", e); }
+                        } catch (e) {}
                     }
                 };
             }, [isScanning]);
