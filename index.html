@@ -278,7 +278,7 @@
                                 if(navigator.vibrate) navigator.vibrate(200);
                                 if (fixIosInterval) clearInterval(fixIosInterval);
 
-                                // Stop camera ngay khi quét được
+                                // Stop camera ngay khi quét được (CHỨC NĂNG QUÉT 1 LẦN)
                                 try {
                                     if (html5QrCode.isScanning) {
                                         await html5QrCode.stop();
@@ -286,7 +286,7 @@
                                     }
                                 } catch (err) {}
 
-                                setIsScanning(false);
+                                setIsScanning(false); // Đóng UI Scanner ngay lập tức
                                 processCode(decodedText);
                             },
                             (errorMessage) => {}
